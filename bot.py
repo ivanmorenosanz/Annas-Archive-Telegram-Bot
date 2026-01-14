@@ -37,16 +37,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['results'] = results
 
     keyboard = []
-    response_text = "📚 **Search Results:**\n\n"
+    response_text = "📚 *Results:*\n\n"
     
     for i, book in enumerate(results[:5]):
-        # Limit title length for display
-        display_title = book['title'][:100] + "..." if len(book['title']) > 100 else book['title']
-        response_text += f"{i+1}. {display_title}\n   _{book['author']}_\n   `{book['file_info']}`\n\n"
+        title = book['title'][:45] + "…" if len(book['title']) > 45 else book['title']
+        author = book['author'][:25] if book['author'] != "Unknown Author" else ""
+        year = book.get('year', '')
+        ext = book.get('extension', '')
         
-        # Add a button for this book
-        # Callback data: "dl_<md5>"
-        keyboard.append([InlineKeyboardButton(f"{i+1}. Download", callback_data=f"dl_{book['md5']}")])
+        # Build clean info line: Author (Year) · EXT
+        info_parts = []
+        if author:
+            info_parts.append(author)
+        if year:
+            info_parts.append(f"({year})")
+        if ext:
+            info_parts.append(ext)
+        
+        info_line = " · ".join(info_parts) if info_parts else ""
+        
+        if info_line:
+            response_text += f"{i+1}. *{title}* - {info_line}\n"
+        else:
+            response_text += f"{i+1}. *{title}*\n"
+        keyboard.append([InlineKeyboardButton(f"⬇️ {i+1}", callback_data=f"dl_{book['md5']}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(response_text, parse_mode='Markdown', reply_markup=reply_markup)

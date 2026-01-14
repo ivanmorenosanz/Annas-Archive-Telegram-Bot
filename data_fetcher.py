@@ -74,12 +74,8 @@ def search_books(query):
     
     for row in soup.find_all('div', class_=lambda c: c and 'flex' in c and 'border-b' in c and 'border-gray-100' in c):
         try:
-            # Find Title
-            # Title link usually has href starting with /md5/ and class text-[#2563eb] or similar highlighting
-            title_link = row.find('a', href=lambda h: h and '/md5/' in h and row.find('div', class_='text-[#2563eb]') is None)
-            
-            # Refined title finder: Look for the specific class used for titles
-            # "custom-a text-[#2563eb] ... text-lg font-semibold"
+            # Find Title link with /md5/ href and text-lg class
+            title_link = None
             for a in row.find_all('a', href=True):
                 if '/md5/' in a['href'] and 'text-lg' in a.get('class', []):
                     title_link = a
@@ -92,58 +88,57 @@ def search_books(query):
             if md5 in seen_md5s:
                 continue
             
-            title = title_link.get_text(strip=True)
+            # Get only direct text from title link (not nested elements)
+            # Use .string or iterate only direct strings
+            title_parts = []
+            for child in title_link.children:
+                if isinstance(child, str):
+                    title_parts.append(child.strip())
+            title = ' '.join(title_parts).strip()
             
-            # Find Author
-            # Usually the next link after title, or a link with /search?q=
+            # Fallback if no direct text found
+            if not title:
+                title = title_link.get_text(strip=True)
+                # Clean up: remove everything after common garbage patterns
+                for pattern in ['Read more', 'nexusstc/', 'lgli/', 'lgrs/']:
+                    if pattern in title:
+                        title = title.split(pattern)[0].strip()
+            
+            # Find Author - first /search?q= link that looks like an author name
             author_str = "Unknown Author"
-            # Look for the author link which comes after the title
-            # In the sample: <a href="/search?q=..." ...> ... J. K. Rowling ... </a>
-            # We can find all links with /search?q= and pick the first one that is likely the author
-            author_links = []
             for a in row.find_all('a', href=True):
                 if '/search?q=' in a['href'] and a != title_link:
-                     author_links.append(a.get_text(strip=True))
-            
-            if author_links:
-                author_str = author_links[0] # The first one is usually the author
+                    text = a.get_text(strip=True)
+                    # Skip if it looks like a file path or garbage
+                    if text and not any(x in text for x in ['/', '.pdf', '.epub', '.rar', 'nexusstc', 'lgli']):
+                        # Skip very long strings (likely descriptions)
+                        if len(text) < 80:
+                            author_str = text
+                            break
 
-            # Find File Info
-            # In the sample: <div class="text-gray-800 dark:text-slate-400 font-semibold text-sm leading-[1.2] mt-2">✅ English [en] · EPUB · 0.7MB · 2015 ...
-            # We can target this specific div by its classes or content
-            file_info = "Unknown Format"
+            # Find File Info - Extract year and extension
+            year = ""
+            extension = ""
             
-            # Strategy: look for a div that contains common file extensions or size units
-            # Or use the specific class string if consistent
-            # "text-gray-800 dark:text-slate-400 font-semibold text-sm leading-[1.2] mt-2"
-            
-            # Let's find the div that contains a dot separator '·' and maybe 'MB' or 'KB'
             for div in row.find_all('div'):
                 text = div.get_text(strip=True)
-                if '·' in text and any(x in text for x in ['MB', 'KB', 'pdf', 'epub']):
-                    # Clean up the text. It might contain "Save" or other buttons.
-                    # We only want the format info part.
-                    # Example text: "✅ English [en] · EPUB · 0.7MB · 2015 · 📕 Book (fiction) · 🚀/nexusstc/upload/zlib · Save"
-                    
-                    # Split by '·' and take the relevant parts?
-                    # Or just take the whole string but truncate before "Save"
+                if '·' in text and any(x in text.upper() for x in ['MB', 'KB', 'PDF', 'EPUB', 'MOBI', 'CBZ']):
                     if "Save" in text:
                         text = text.split("Save")[0]
-                        
-                    # Remove "✅" and extra spaces
+                    
                     text = text.replace("✅", "").strip()
-                    
-                    # Try to keep just Language, Format, Size
-                    # This is subjective, but let's try to be concise
                     parts = [p.strip() for p in text.split('·')]
-                    # Filter out empty or "Book" or "upload" related noise if desired, but user just said "simple".
-                    # Let's keep it relatively clean.
-                    clean_parts = []
-                    for p in parts:
-                        if not any(x in p for x in ['🚀', 'Book', 'upload', 'nexusstc', 'zlib']):
-                            clean_parts.append(p)
                     
-                    file_info = " · ".join(clean_parts)
+                    for p in parts:
+                        # Extract file extension (PDF, EPUB, MOBI, etc.)
+                        p_upper = p.upper()
+                        if any(ext in p_upper for ext in ['PDF', 'EPUB', 'MOBI', 'CBZ', 'AZW', 'DJVU']):
+                            extension = p.strip()
+                        # Extract year (4 digit number between 1900-2099)
+                        if p.strip().isdigit() and len(p.strip()) == 4:
+                            yr = int(p.strip())
+                            if 1900 <= yr <= 2099:
+                                year = p.strip()
                     break
                     
             seen_md5s.add(md5)
@@ -151,7 +146,8 @@ def search_books(query):
                 'title': title,
                 'author': author_str,
                 'md5': md5,
-                'file_info': file_info
+                'year': year,
+                'extension': extension
             })
             
             if len(results) >= 10:
